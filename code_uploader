@@ -1,0 +1,140 @@
+#!/usr/bin/env python
+import argparse
+import logging
+import os
+import re
+import serial
+import time
+
+logging.getLogger().setLevel(logging.DEBUG)
+logging.info("VM2 Uploader")
+
+
+class Venom2(object):
+    RE_HEADER = re.compile(r'^VM2 Control Computer')
+    RE_QUESTIONS = re.compile(r'^(Clear RAM|Are you sure|Application in Flash: Erase Application)\?')
+    RE_PROMPT = re.compile(r'^-->\s*$')
+
+    RE_PHEADER = re.compile(r'^\[.+\]')
+    RE_ENDOFFILE = re.compile(r'^End of file "(.+)"')
+    RE_SYNTAXERRORS = re.compile(r'^(\d+) syntax errors in \'(.+)\'')
+
+    def __init__(self, project, serial="ttyUSB0"):
+        self._project = project
+        self._serial_device = os.path.join(os.sep, "dev", serial)
+        self._serial = None
+
+        self._init_venom()
+
+    def _init_venom(self):
+        if not os.path.exists(self._serial_device):
+            raise RuntimeError("No available serial device at {}".format(self._serial_device))
+
+        if not os.path.exists(self._project):
+            raise RuntimeError("No available project at {}".format(self._project))
+
+        self._serial = serial.Serial(
+            port=self._serial_device,
+            baudrate=115200,
+            bytesize=serial.EIGHTBITS,
+            parity=serial.PARITY_NONE,
+            stopbits=serial.STOPBITS_ONE,
+            timeout=1,
+        )
+
+    def upload(self):
+        logging.info("Please reset the device")
+
+        if not self._serial.is_open:
+            self._serial.open()
+
+        self._prep_to_prompt()
+        self._send_project()
+
+        if self._serial.is_open:
+            self._serial.close()
+
+    def _prep_to_prompt(self):
+        line = self._serial.readline().decode()
+        while not Venom2.RE_HEADER.match(line):
+            line = self._serial.readline().decode()
+            time.sleep(1)
+
+        logging.info("Clearing out VM2")
+
+        while not Venom2.RE_PROMPT.match(line):
+            line = self._serial.readline().decode().strip()
+            if not line or len(line) == 0:
+                continue
+            logging.debug("Got line {}".format(line))
+
+            if Venom2.RE_QUESTIONS.match(line):
+                logging.debug("Answering clearance question...")
+                self._serial.write("Y\n".encode())
+
+    def _send_project(self):
+        logging.info("Sending project to VM2")
+
+        pbuffer = self._buffer_project()
+
+        for pfile in pbuffer:
+            logging.debug("Sending {}".format(pfile['name']))
+
+            for line in pfile['contents']:
+                self._serial.write(line)
+            time.sleep(1)
+
+            ended = False
+            while not ended:
+                response = self._serial.readline().decode()
+                logging.debug("Received {}".format(response.strip()))
+                match = Venom2.RE_ENDOFFILE.search(response)
+                if match and match.group(1) == pfile['name']:
+                    while not Venom2.RE_PROMPT.match(response):
+                        response = self._serial.readline().decode()
+                        logging.debug("Receive {}".format(response.strip()))
+                    ended = True
+
+    def _buffer_project(self):
+        buffer = list()
+
+        cwd = os.getcwd()
+        nwd = os.path.dirname(self._project)
+        os.chdir(nwd)
+
+        with open(self._project, "r") as pfh:
+            for line in pfh:
+                line = line.strip()
+                if Venom2.RE_PHEADER.match(line):
+                    continue
+
+                logging.debug("Ingesting {}".format(line))
+                buffer.append({
+                    'name':     line,
+                    'contents': Venom2.read_vm2_code(line)
+                })
+
+        os.chdir(cwd)
+        return buffer
+
+    @staticmethod
+    def read_vm2_code(filename):
+        file_contents = list()
+        file_contents.append(("\nPROGRAM \"{}\"\n".format(filename)).encode())
+
+        with open(filename, "r") as pfile:
+            for line in pfile:
+                file_contents.append(line.encode())
+
+        file_contents.append("\nPROGRAM End\n".encode())
+        return file_contents
+
+if __name__ == '__main__':
+    a = argparse.ArgumentParser()
+    a.add_argument("project_file", help="VM2 Project Definition File")
+    a.add_argument("-s", "--serial", default="ttyUSB0", 
+                   help="Serial line to hook into")
+    args = a.parse_args()
+
+    vm2 = Venom2(args.project_file, args.serial)
+    vm2.upload()
