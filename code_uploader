@@ -6,9 +6,6 @@ import re
 import serial
 import time
 
-logging.getLogger().setLevel(logging.DEBUG)
-logging.info("VM2 Uploader")
-
 
 class Venom2(object):
     RE_HEADER = re.compile(r'^VM2 Control Computer')
@@ -130,6 +127,9 @@ class Venom2(object):
         return file_contents
 
 if __name__ == '__main__':
+    logging.getLogger().setLevel(logging.DEBUG)
+    logging.info("VM2 Uploader")
+
     a = argparse.ArgumentParser()
     a.add_argument("project_file", help="VM2 Project Definition File")
     a.add_argument("-s", "--serial", default="ttyUSB0", 
