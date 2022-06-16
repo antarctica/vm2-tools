@@ -1,2 +1,5 @@
 .idea
 *.vpj
+*.pyc
+/venv/
+__pycache__/
