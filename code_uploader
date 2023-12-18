@@ -13,6 +13,8 @@ class Venom2(object):
     RE_PROMPT = re.compile(r'^-->\s*$')
 
     RE_PHEADER = re.compile(r'^\[.+\]')
+    RE_XFILEHEADER = re.compile(r'^\<\?xml')
+    RE_XHEADER = re.compile(r'<string>(.+\.vnm)</string>')
     RE_ENDOFFILE = re.compile(r'^End of file "(.+)"')
     RE_SYNTAXERRORS = re.compile(r'^(\d+) syntax errors in \'(.+)\'')
 
@@ -94,21 +96,43 @@ class Venom2(object):
 
     def _buffer_project(self):
         buffer = list()
+        first_line = True
+        xml_project = False
 
         cwd = os.getcwd()
         nwd = os.path.dirname(self._project)
-        os.chdir(nwd)
+
+        if nwd != "":
+            os.chdir(nwd)
 
         with open(self._project, "r") as pfh:
             for line in pfh:
                 line = line.strip()
-                if Venom2.RE_PHEADER.match(line):
-                    continue
 
-                logging.debug("Ingesting {}".format(line))
+                if first_line:
+                    first_line = False
+                    if Venom2.RE_XFILEHEADER.match(line):
+                        xml_project = True
+                        continue
+                    
+                    if Venom2.RE_PHEADER.match(line):
+                        continue
+
+                filename = line
+
+                if xml_project:
+                    match = Venom2.RE_XHEADER(line)
+
+                    if match is not None:
+                        try:
+                            filename = match.group(1)
+                        except IndexError:
+                            continue
+
+                logging.debug("Ingesting {}".format(filename))
                 buffer.append({
-                    'name':     line,
-                    'contents': Venom2.read_vm2_code(line)
+                    'name':     filename,
+                    'contents': Venom2.read_vm2_code(filename)
                 })
 
         os.chdir(cwd)
