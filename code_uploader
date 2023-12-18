@@ -113,6 +113,7 @@ class Venom2(object):
                     first_line = False
                     if Venom2.RE_XFILEHEADER.match(line):
                         xml_project = True
+                        logging.info("We're using the new XML project format")
                         continue
                     
                     if Venom2.RE_PHEADER.match(line):
@@ -121,13 +122,15 @@ class Venom2(object):
                 filename = line
 
                 if xml_project:
-                    match = Venom2.RE_XHEADER(line)
+                    match = Venom2.RE_XHEADER.match(line)
 
                     if match is not None:
                         try:
                             filename = match.group(1)
                         except IndexError:
                             continue
+                    else:
+                        continue
 
                 logging.debug("Ingesting {}".format(filename))
                 buffer.append({
